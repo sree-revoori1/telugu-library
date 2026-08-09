@@ -271,6 +271,7 @@ def render_verse_text(document) -> str:
                         "p": m.pos or "",
                         "e": m.etymology or "",
                         "n": m.english or "",
+                        "s": 1 if m.shared else 0,
                     }
                     for m in morphemes
                 ],
@@ -304,6 +305,9 @@ VERSE_PANEL_JS = """
     var ms = JSON.parse(w.dataset.m);
     var rows = ms.map(function (m) {
       var bits = ['<span class="lemma">' + m.f + '</span>'];
+      // A word that runs across the line break is listed under both halves. Saying so
+      // stops it looking like the wrong word was attached.
+      if (m.s) bits.push('<span class="shared">spans the line break</span>');
       if (m.g) bits.push('<span class="tel">' + m.g + '</span>');
       if (m.p) bits.push('<span class="tag">' + m.p + '</span>');
       if (m.e) bits.push('<span class="tag">' + m.e + '</span>');
@@ -334,4 +338,5 @@ VERSE_CSS = """
 }
 #panel .tel { color: var(--ink); }
 #panel .en { color: var(--dim); font-style: italic; }
+#panel .shared { color: var(--dim); font-size: .75rem; }
 """

@@ -122,6 +122,8 @@ class Morpheme:
     etymology: str | None = None
     english: str | None = None
     in_dictionary: bool = False
+    # True when this morpheme spans a token boundary, so it is listed under both tokens.
+    shared: bool = False
 
     @property
     def is_suffix(self) -> bool:
@@ -424,6 +426,18 @@ def align(verse: Verse) -> list[tuple[str, list[Morpheme]]]:
             if any(neighbour in (index - 1, index + 1) for neighbour in indices):
                 by_token[token_index].append(index)
                 break
+
+    # A morpheme appearing under more than one token straddles a line break: Telugu writes
+    # a word's final consonant as the first letter of the following token, so `జనించెన్`
+    # ends inside `నంత.`. Marked as shared, so the reader is told rather than left to
+    # wonder why a token lists a word that is mostly elsewhere.
+    appearances: dict[int, int] = {}
+    for indices in by_token:
+        for index in indices:
+            appearances[index] = appearances.get(index, 0) + 1
+    for index, count in appearances.items():
+        if count > 1:
+            verse.morphemes[index].shared = True
 
     return [
         (token, [verse.morphemes[i] for i in sorted(indices)])
