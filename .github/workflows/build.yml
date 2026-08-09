@@ -1,8 +1,12 @@
-name: Build and deploy
+name: Build
 
-# Rebuilds the site and publishes it to GitHub Pages. Runs on a push to main and
-# weekly, because Wikisource's texts are edited continuously — a library that never
-# refetches slowly drifts away from its sources.
+# Builds the site and uploads it as an artifact. Runs on a push to main and weekly,
+# because Wikisource's texts are edited continuously — a library that never refetches
+# slowly drifts away from its sources.
+#
+# It does not deploy. GitHub Pages requires a public repository on the free plan, and
+# this one is private; publishing is a separate step the README describes. The artifact
+# is the whole site, so it can be downloaded and dropped on any host.
 on:
   push:
     branches: [main]
@@ -12,13 +16,10 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
-# One deploy at a time; a queued run should supersede rather than race.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: build
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -30,8 +31,20 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install telugu-morph
-        run: pip install "git+https://github.com/sree-revoori1/telugu-morph"
+      # telugu-morph is a private repository, so an anonymous clone fails with
+      # "could not read Username for 'https://github.com'". Checked out as a sibling
+      # with a token instead, and put on PYTHONPATH — no install step needed, since it
+      # is pure standard library.
+      #
+      # ACCESS_TOKEN must be a repository secret: a fine-grained PAT with read access
+      # to telugu-morph. The default GITHUB_TOKEN is scoped to *this* repository only
+      # and cannot see another private one.
+      - name: Check out telugu-morph
+        uses: actions/checkout@v4
+        with:
+          repository: sree-revoori1/telugu-morph
+          path: telugu-morph
+          token: ${{ secrets.ACCESS_TOKEN }}
 
       # The corpus is ~4,800 Wikisource pages fetched at a courtesy rate, which takes
       # far longer than a job should. Caching it means only the first run pays, and
@@ -45,20 +58,15 @@ jobs:
 
       - name: Test
         run: python3 tests/test_library.py
+        env:
+          PYTHONPATH: src:telugu-morph/src
 
       - name: Build
-        run: PYTHONPATH=src python3 -m telugu_library.build --all
+        run: python3 -m telugu_library.build --all
+        env:
+          PYTHONPATH: src:telugu-morph/src
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
+          name: site
           path: site
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
