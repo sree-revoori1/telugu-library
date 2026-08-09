@@ -186,6 +186,67 @@ eq(Token(surface="౧౨౩").is_telugu, False, "Telugu digits are not word toke
 eq(Token(surface="౬౪").is_telugu, False, "a two-digit Telugu numeral is not a word")
 
 
+# --- The Bhāgavatam pipeline -----------------------------------------------
+
+from telugu_library.bhagavatam import (
+    Morpheme, SUFFIXES, align, aksharams, parse_page, split_gloss,
+)
+
+# The discovery the project turned on: Wikisource's Bhāgavatam carries an editorial
+# word-by-word gloss, so the sandhi splitting that no automatic analyser managed is
+# already done by a scholar.
+SAMPLE = (
+    "తెభా-1-1-శా.శ్రీ కైవల్య పదంబుఁ జేరుటకునై చింతించెదన్"
+    "టీక:- శ్రీ = శుభకర మైన; కైవల్య = ముక్తి; పదంబున్ = స్థితిని; "
+    "చేరుట = పొందుట; కున్ = కోసము; ఐ = ఐ; చింతించెదన్ = ప్రార్థించెదన్"
+    "భావము:- మోక్షము చేరుటకై ప్రార్థించెదను."
+)
+verses = parse_page(SAMPLE)
+eq(len(verses), 1, "a verse is parsed from its id marker")
+verse = verses[0]
+eq(verse.reference, "1-1", "the citable reference is recovered")
+eq(verse.metre_name, "śārdūlam", "the metre abbreviation is expanded")
+eq(len(verse.morphemes), 7, "every gloss pair becomes a morpheme")
+eq(verse.morphemes[0].gloss, "శుభకర మైన", "the editor's meaning is kept verbatim")
+
+# Regression: the paraphrase is a separate field. Without splitting it off, it was
+# swallowed into the last morpheme's meaning, so `చింతించెదన్` carried a whole sentence.
+check(verse.paraphrase.startswith("మోక్షము"), "the భావము paraphrase is separated",
+      f"got {verse.paraphrase[:40]!r}")
+check("భావము" not in verse.morphemes[-1].gloss,
+      "regression: the paraphrase does not leak into the last gloss")
+
+# Alignment counts aksharams, not codepoints. `జేరుటకునై` is 5 aksharams and 9
+# codepoints; its three morphemes are 6 aksharams and 10 codepoints — so codepoint
+# arithmetic bears no relation to the fit, and drifted a token out of step in one line.
+eq(len(aksharams("జేరుటకునై")), 5, "aksharams are counted, not codepoints")
+alignment = align(verse)
+placed = {token: [m.form for m in ms] for token, ms in alignment}
+eq(placed.get("జేరుటకునై"), ["చేరుట", "కున్", "ఐ"],
+   "a sandhi-fused token aligns to its three morphemes")
+eq(placed.get("పదంబుఁ"), ["పదంబున్"], "a token with sandhi at its edge still aligns")
+# No gloss may be dropped: every morpheme is placed somewhere.
+eq(sum(len(ms) for _, ms in alignment), len(verse.morphemes),
+   "alignment places every morpheme")
+
+# Verses with no editorial gloss are skipped rather than shown unexplained.
+eq(len(parse_page("తెభా-1-2-వ.ఇది గ్లాసు లేని పద్యము.")), 0,
+   "a verse without a టీక gloss is skipped")
+eq(len(parse_page("తెభా-1-2-వ.ఇది గ్లాసు లేని పద్యము.", glossed_only=False)), 1,
+   "...unless the caller asks for it")
+
+# Bound morphemes are settled by the closed inflectional inventory, not the dictionary.
+# `కున్` is the dative suffix and matches only Urdu dictionaries, which report a noun.
+check(Morpheme(form="కున్", gloss="కోసము").is_suffix, "a case suffix is recognised")
+check(Morpheme(form="కున్", gloss="కోసము").accounted,
+      "a suffix counts as accounted for without a dictionary")
+check(not Morpheme(form="కైవల్య", gloss="ముక్తి").is_suffix,
+      "a lexical word is not a suffix")
+
+eq(split_gloss("అ = ఒకటి; ఇ = రెండు"), [("అ", "ఒకటి"), ("ఇ", "రెండు")],
+   "gloss pairs split on semicolons")
+
+
 # --- Report ---------------------------------------------------------------
 
 print()

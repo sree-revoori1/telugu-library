@@ -106,7 +106,7 @@ PANEL_JS = """
 """
 
 
-def _page(title: str, body: str, depth: int = 0) -> str:
+def _page(title: str, body: str, depth: int = 0, panel: str | None = None) -> str:
     """One HTML page. `depth` sets how far back the root is, for relative links."""
     up = "../" * depth
     return f"""<!DOCTYPE html>
@@ -114,7 +114,7 @@ def _page(title: str, body: str, depth: int = 0) -> str:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title>
-<style>{CSS}</style>
+<style>{CSS}{VERSE_CSS}</style>
 <body>
 <div class="wrap">
 <header><h1><a href="{up}index.html">తెలుగు గ్రంథాలయం</a></h1>
@@ -127,7 +127,7 @@ Morphology by <a href="https://github.com/sree-revoori1/telugu-morph">telugu-mor
 </footer>
 </div>
 <div id="panel"></div>
-<script>{PANEL_JS}</script>
+<script>{panel or PANEL_JS}</script>
 </body></html>
 """
 
@@ -190,7 +190,10 @@ def render_document(document: Document, depth: int = 1) -> str:
 def render_index(genres: dict[str, list], descriptions: dict[str, str]) -> str:
     """The front page: genres, with counts."""
     parts = ['<div class="genre-grid">']
-    for genre, works in sorted(genres.items(), key=lambda kv: -len(kv[1])):
+    # Insertion order, not size order. For a work in books the sequence *is* the
+    # structure, and sorting the Bhāgavatam's skandhams by section count would present
+    # the tenth book first.
+    for genre, works in genres.items():
         description = html.escape(descriptions.get(genre, ""))
         parts.append(
             f'<div><a href="genre/{html.escape(genre)}.html">{html.escape(genre)}</a> '
@@ -223,3 +226,112 @@ def render_genre(genre: str, entries: list[tuple[str, str]]) -> str:
 def write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def render_verse_text(document) -> str:
+    """A Bhāgavatam-style annotated text: verse as printed, morphemes on click.
+
+    Different from `render_document` because the material is different. Here every token
+    has an editorial morpheme breakdown, so the panel shows the *structure* of a word —
+    `రక్షైకారంభకు` = `రక్ష` + `ఏక` + `ఆరంభ` + `కున్` — rather than a single lemma. That
+    breakdown is the thing a reader of classical verse actually needs, and it is what no
+    amount of automatic sandhi reversal produced reliably.
+
+    `document` is a `bhagavatam.AnnotatedText`.
+    """
+    parts: list[str] = [f"<h1>{html.escape(document.title)}</h1>"]
+    annotated = document.annotated_verses
+    total = len(document.verses)
+    summary = f"{total:,} verses"
+    if annotated < total:
+        summary += f", {annotated:,} with a word-by-word gloss"
+    summary += f" · {document.morpheme_count:,} glossed morphemes"
+    parts.append(
+        f'<p class="sub">{summary} · '
+        f'<a href="{html.escape(document.url)}">source</a></p>'
+    )
+
+    for verse in document.verses:
+        parts.append('<div class="verse">')
+        parts.append(
+            f'<div class="vref">{verse.reference}'
+            f' <span class="metre">{html.escape(verse.metre_name)}</span></div>'
+        )
+        rendered: list[str] = []
+        for token, morphemes in verse.alignment:
+            escaped = html.escape(token)
+            if not morphemes:
+                rendered.append(f'<span class="gap">{escaped}</span>')
+                continue
+            payload = json.dumps(
+                [
+                    {
+                        "f": m.form,
+                        "g": m.gloss,
+                        "p": m.pos or "",
+                        "e": m.etymology or "",
+                        "n": m.english or "",
+                    }
+                    for m in morphemes
+                ],
+                ensure_ascii=False,
+            )
+            rendered.append(
+                f'<span class="w" data-m="{html.escape(payload)}">{escaped}</span>'
+            )
+        parts.append('<p class="line">' + " ".join(rendered) + "</p>")
+        if verse.paraphrase:
+            # The editor's prose paraphrase, quoted rather than rewritten. It is their
+            # scholarship and it is what makes a 15th-century verse comprehensible.
+            parts.append(
+                f'<p class="bhavamu">{html.escape(verse.paraphrase)}</p>'
+            )
+        parts.append("</div>")
+
+    return _page(document.title, "\n".join(parts), depth=1, panel=VERSE_PANEL_JS)
+
+
+# The morpheme panel. Shows each piece of the clicked word with the editor's gloss, the
+# part of speech where a dictionary gave one, and a link to andhrabharati — which is how
+# this project uses that site: as a place to send the reader, not a corpus to copy.
+VERSE_PANEL_JS = """
+(function () {
+  var panel = document.getElementById('panel');
+  if (!panel) return;
+  document.addEventListener('click', function (e) {
+    var w = e.target.closest ? e.target.closest('.w') : null;
+    if (!w) return;
+    var ms = JSON.parse(w.dataset.m);
+    var rows = ms.map(function (m) {
+      var bits = ['<span class="lemma">' + m.f + '</span>'];
+      if (m.g) bits.push('<span class="tel">' + m.g + '</span>');
+      if (m.p) bits.push('<span class="tag">' + m.p + '</span>');
+      if (m.e) bits.push('<span class="tag">' + m.e + '</span>');
+      if (m.n) bits.push('<span class="en">' + m.n + '</span>');
+      bits.push('<a class="dict" target="_blank" rel="noopener" href="'
+        + 'https://andhrabharati.com/dictionary/?w=' + encodeURIComponent(m.f)
+        + '">\\u2197</a>');
+      return '<div class="mrow">' + bits.join(' &nbsp; ') + '</div>';
+    }).join('');
+    panel.innerHTML = '<span class="close">close</span>'
+      + '<div class="surface">' + w.textContent + '</div>' + rows;
+    panel.classList.add('on');
+  });
+  panel.addEventListener('click', function (e) {
+    if (e.target.classList.contains('close')) panel.classList.remove('on');
+  });
+})();
+"""
+
+VERSE_CSS = """
+.verse { margin: 0 0 1.6rem; }
+.vref { color: var(--dim); font-size: .75rem; letter-spacing: .04em; }
+.metre { font-style: italic; }
+.mrow { padding: .2rem 0; }
+.bhavamu {
+  margin: .35rem 0 0 1.5rem; color: var(--dim); font-size: .92rem;
+  border-left: 2px solid var(--rule); padding-left: .8rem;
+}
+#panel .tel { color: var(--ink); }
+#panel .en { color: var(--dim); font-style: italic; }
+"""
