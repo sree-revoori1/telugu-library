@@ -1,0 +1,64 @@
+name: Build and deploy
+
+# Rebuilds the site and publishes it to GitHub Pages. Runs on a push to main and
+# weekly, because Wikisource's texts are edited continuously — a library that never
+# refetches slowly drifts away from its sources.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 4 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; a queued run should supersede rather than race.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install telugu-morph
+        run: pip install "git+https://github.com/sree-revoori1/telugu-morph"
+
+      # The corpus is ~4,800 Wikisource pages fetched at a courtesy rate, which takes
+      # far longer than a job should. Caching it means only the first run pays, and
+      # later runs fetch just what is new.
+      - name: Restore the corpus cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/telugu-library
+          key: corpus-${{ hashFiles('data/catalogue.json') }}
+          restore-keys: corpus-
+
+      - name: Test
+        run: python3 tests/test_library.py
+
+      - name: Build
+        run: PYTHONPATH=src python3 -m telugu_library.build --all
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

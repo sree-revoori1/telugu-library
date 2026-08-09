@@ -76,11 +76,18 @@ def main(argv: list[str] | None = None) -> int:
     analyser, lexicon = _analyser()
     rendered: dict[str, list[tuple[str, str]]] = defaultdict(list)
     total_tokens = analysed_tokens = 0
+    sanskrit_texts = sanskrit_tokens = 0
     skipped = 0
 
     for genre, entries in by_genre.items():
         for index, work in enumerate(entries, 1):
-            page = cached_page(work.title)
+            try:
+                page = cached_page(work.title)
+            except Exception:
+                # Network failure mid-build. The cache makes the build resumable, so
+                # skipping is right — a rerun picks it up.
+                skipped += 1
+                continue
             if page is None or not page.text.strip():
                 skipped += 1
                 continue
@@ -103,8 +110,14 @@ def main(argv: list[str] | None = None) -> int:
                 site.render_document(document),
             )
             rendered[genre].append((work.title, work.slug))
-            total_tokens += document.token_count
-            analysed_tokens += document.analysed_count
+            if document.language == "sanskrit":
+                # Counted separately. Averaging coverage across two languages reports a
+                # number that describes neither.
+                sanskrit_texts += 1
+                sanskrit_tokens += document.token_count
+            else:
+                total_tokens += document.token_count
+                analysed_tokens += document.analysed_count
             if index % 25 == 0:
                 print(f"  {genre}: {index}/{len(entries)}", flush=True)
 
@@ -117,11 +130,13 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     coverage = 100.0 * analysed_tokens / total_tokens if total_tokens else 0.0
+    built = sum(len(e) for e in rendered.values())
+    print(f"\nbuilt {built:,} texts ({skipped:,} skipped as stubs)")
+    print(f"  Telugu:   {total_tokens:,} words, {coverage:.1f}% with a gloss")
     print(
-        f"\nbuilt {sum(len(e) for e in rendered.values()):,} texts"
-        f" ({skipped:,} skipped as stubs)"
+        f"  Sanskrit: {sanskrit_texts:,} texts, {sanskrit_tokens:,} words,"
+        " presented without glosses"
     )
-    print(f"  {total_tokens:,} Telugu words, {coverage:.1f}% with a gloss")
     print(f"  written to {args.out}")
     return 0
 

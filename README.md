@@ -38,55 +38,98 @@ errors. Wikisource's texts are hand-edited Unicode, with the verse markers (`క
 
 ## How much is actually glossed
 
-**26.5% of words, measured over 21 texts of 100+ tokens.** This is the number to
-judge the project by and it is not good yet:
+**77.6% of Telugu words**, measured over 63,125 words across 150 texts. Coverage is
+printed on every page, and a word the analyser cannot explain is rendered as plain text
+rather than as a clickable word with an empty gloss — a reader who clicks and gets
+nothing learns to distrust the glosses that work.
 
-| genre | glossed |
-|---|---|
-| నాటకాలు — drama | 45.4% |
-| పురాణాలు — Purāṇas | 38.9% |
-| కవిత్వము — poetry | 28.7% |
-| శతకములు — śatakams | 26.7% |
-| ఇతిహాసాలు — epics | **7.3%** |
+That figure was 26.5% before three things were fixed, and it is worth being precise
+that almost all of the gain was correcting mistakes rather than adding capability.
 
-The gradient is the story: drama is close to modern spoken Telugu, and the 11th-century
-epics are furthest from it. Coverage is printed on every page, and a word the analyser
-cannot explain is rendered as plain text rather than as a clickable word with an empty
-gloss — a reader who clicks and gets nothing learns to distrust the glosses that work.
+**Most of the "epics" are not Telugu.** Wikisource's ఇతిహాసాలు category is dominated by
+the Vālmīki Rāmāyaṇam — Sanskrit, transliterated into Telugu script. Of 396 cached texts
+over 400 characters, 341 are Sanskrit. This was corrupting everything: a Telugu analyser
+cannot parse Sanskrit, and where it did produce something the gloss was confident
+nonsense — the Sanskrit locative `సూర్యే` came back as a habitual participle of an
+invented Telugu verb `సూర్యు`. `language.py` separates them by word ending, which is
+where the languages differ mechanically: Sanskrit ends words in visarga, a bare
+consonant, `-స్య`, `-ేన`, and Telugu never does. The distribution is strongly bimodal —
+Telugu under 10%, Sanskrit 21–32% — so the threshold sits in an empty gap. Sanskrit texts
+are now presented as text and **labelled as Sanskrit** rather than mis-glossed.
 
-### Why it is 26% and not 90%
+**An uninflected word is not a failure.** The gap test also required a suffix to have
+been peeled off, which is simply wrong: most Telugu tokens in running text are
+uninflected, so `ఈ` (294,297 occurrences), `మీ` (148,590) and `తన` (111,810) analyse to
+themselves, which is the correct answer. Marking them unanalysed made the commonest
+words in the language look like gaps.
 
-Two causes, both measured, and only one is fixed.
+**Telugu digits were being analysed as words.** `[ఀ-౿]` includes U+0C66–6F, so every
+verse number in Telugu numerals went to the analyser — `౩`, `౬౪`, `౨` were among the
+commonest "unanalysed words" in the Rāmāyaṇam.
 
-**Orthography — fixed.** Classical Telugu marks a nasalised vowel with the arasunna
-(ఁ), which modern Telugu dropped. It appears in 12.5% of classical tokens and in 379
-of a modern corpus's 613,429 forms, so nearly every classical word missed the lexicon
-by one codepoint. Folding it is safe — of 251 arasunna forms whose stripped version is
-also attested, every one is the same word (తెలుఁగు/తెలుగు, కుమారుఁడు/కుమారుడు) and
-there are no minimal pairs. This took decomposition from 11.6% to 14.9%.
+### What still limits it
 
-**Tokenisation — not fixed, and the larger problem.** Classical verse writes sandhi
-*across* the word boundary and breaks lines on the metrical foot, so `పురుషుండు
-ఆఢ్యుఁడు` is printed as `పురుషుం డాఢ్యుఁడు`. The printed token is the tail of one
-word plus the head of the next, and no amount of morphology will parse it, because it
-is not a word. Moving the initial consonant back does recover real words — `పురుషుండు`
-is attested — but the recovered halves are largely Sanskrit vocabulary that a corpus of
-Wikipedia and newspapers does not contain.
+**Orthography — fixed.** Classical Telugu marks a nasalised vowel with the arasunna (ఁ),
+which modern Telugu dropped: 12.5% of classical tokens, against 379 of a modern corpus's
+613,429 forms. Folding it is safe — of 251 arasunna forms whose stripped version is also
+attested, every one is the same word and there are no minimal pairs.
 
-So the ceiling is set by the lexicon, not the grammar. Raising it needs a classical
-lexicon: a Sanskrit-Telugu vocabulary and a cross-token sandhi resolver. Both are real
-work and neither is done.
+**Cross-token sandhi — not fixed.** Classical verse writes sandhi *across* the word
+boundary and breaks lines on the metrical foot, so `పురుషుండు ఆఢ్యుఁడు` prints as
+`పురుషుం డాఢ్యుఁడు`. The printed token is the tail of one word plus the head of the next,
+and no morphology parses it because it is not a word. This is most of the remaining 22%.
 
-## Build it
+**A classical lexicon helps less than expected.** `classical_lexicon.py` harvests
+vocabulary from the corpus itself — a word is admitted if it recurs across two texts or
+occurs five times overall. It correctly admits `తతః`, `వాల్మీకి`, `నృపతి` and refuses the
+fragment `డాఢ్యుఁడు`, but its measured contribution is only 0.1–1.0 points now that the
+bugs above are fixed. Recorded because the idea sounds better than it measures.
+
+### On dictionaries
+
+[andhrabharati.com](https://andhrabharati.com/dictionary/) is the best Telugu dictionary
+aggregator there is, and it was investigated as a data source. Its lookup is a
+JavaScript POST to `getWM.php` carrying a session token, and the site states "All rights
+reserved" over 94 dictionaries licensed individually from publishers — so copying their
+definitions into a public static site would redistribute material under permissions
+granted to someone else. The word panel **links out to it per lemma** instead, which is
+what it is for and costs it nothing.
+
+## Read it locally
 
 ```sh
 pip install git+https://github.com/sree-revoori1/telugu-morph
-python -m telugu_library.build            # a sample, for checking the layout
-python -m telugu_library.build --all      # all 4,842 texts
+git clone https://github.com/sree-revoori1/telugu-library && cd telugu-library
+
+PYTHONPATH=src python3 -m telugu_library.build      # a sample, ~1 minute
+PYTHONPATH=src python3 -m telugu_library.serve      # → http://localhost:8765/
 ```
 
-Every fetched page is cached, so a build is resumable — necessary, because fetching is
-rate-limited out of courtesy to a donated service.
+`--all` builds all 4,842 texts. Every fetched page is cached, so a build is resumable —
+necessary, because fetching is rate-limited out of courtesy to a donated service, and the
+first full run takes a few hours.
+
+## Publish it
+
+The site is static, so it hosts anywhere that serves files. GitHub Pages, end to end:
+
+1. Push the repository to GitHub.
+2. **Settings → Pages → Source: GitHub Actions.** Not "Deploy from a branch" — the
+   included workflow builds the site rather than committing it.
+3. Push to `main`, or run the workflow manually from the **Actions** tab.
+4. The site appears at `https://<user>.github.io/telugu-library/`.
+
+`.github/workflows/build.yml` does the rest: installs telugu-morph, runs the tests,
+builds every text, and deploys. It caches the fetched corpus, so only the first run pays
+the fetch cost, and it re-runs weekly because Wikisource's texts are edited continuously
+and a library that never refetches drifts away from its sources.
+
+Any other static host works the same way — `site/` is the whole artifact:
+
+```sh
+npx wrangler pages deploy site      # Cloudflare Pages
+netlify deploy --dir=site --prod    # Netlify
+```
 
 ## Layout
 
@@ -95,8 +138,11 @@ src/telugu_library/
   wikisource.py   fetching, with provenance and the User-Agent Wikimedia requires
   catalogue.py    walking the category tree into a list of works
   reader.py       text → parsed document, verse preserved, tokens analysed
+  language.py     Telugu vs Sanskrit-in-Telugu-script, by word ending
+  classical_lexicon.py  vocabulary harvested from the corpus itself
   site.py         static HTML: the reading page and the word panel
   build.py        fetch, parse, render
+  serve.py        read it locally
 data/catalogue.json   the 4,842 works, so a rebuild needs no re-traversal
 ```
 
@@ -114,8 +160,15 @@ needs a visited set; a plain recursion does not return.
 
 **A parse is not a gloss.** A sandhi-split fragment analyses perfectly happily —
 `డాఢ్యుఁడు` yields the "lemma" `డాఢ్యుడు`, which occurs zero times in 33 million
-words. Checking that the lemma is attested is what separates a gloss from a guess, and
-without it the site reported 19.1% coverage where the honest figure was 16.5%.
+words. Checking that the lemma is attested is what separates a gloss from a guess.
+
+**Check what language the text is in before analysing it.** 86% of the cached corpus is
+Sanskrit in Telugu script, and a Telugu analyser does not fail cleanly on it — it returns
+confident nonsense. This was the single largest error in the project and it was invisible
+until the glosses were read rather than counted.
+
+**Averaging a metric across two languages describes neither.** Coverage is reported for
+Telugu texts only, with Sanskrit counted separately.
 
 ## Licence
 
