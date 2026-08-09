@@ -332,6 +332,8 @@ VERSE_CSS = """
 .vref { color: var(--dim); font-size: .75rem; letter-spacing: .04em; }
 .metre { font-style: italic; }
 .mrow { padding: .2rem 0; }
+.naama { font-size: 1.25rem; }
+.alt-gloss { border-left-style: dotted; }
 .bhavamu {
   margin: .35rem 0 0 1.5rem; color: var(--dim); font-size: .92rem;
   border-left: 2px solid var(--rule); padding-left: .8rem;
@@ -340,3 +342,61 @@ VERSE_CSS = """
 #panel .en { color: var(--dim); font-style: italic; }
 #panel .shared { color: var(--dim); font-size: .75rem; }
 """
+
+
+def render_sahasranamam(document) -> str:
+    """The thousand names, each with its explanation.
+
+    A list rather than a verse page, because the source is a list — one name per entry with
+    a Telugu explanation. There is no metrical line to preserve and no alignment to do, so
+    the reader gets the name, its number for citation, and the meaning.
+
+    A multi-word name has its words shown separately, since that is the one place a reader
+    needs help and as far as the source goes: `భూతభవ్యభవత్ ప్రభుః` is two words, and
+    knowing where the break falls is most of what a learner wants.
+    """
+    parts: list[str] = [f"<h1>{html.escape(document.title)}</h1>"]
+    complete = "all 1,000" if document.complete else f"{len(document.names):,} of 1,000"
+    parts.append(
+        f'<p class="sub">{complete} names, each with a Telugu explanation · '
+        f'<a href="{html.escape(document.url)}">source</a></p>'
+    )
+
+    for entry in document.names:
+        words = "".join(
+            f'<span class="w" data-m="{html.escape(json.dumps([{"f": word, "g": "", "p": "", "e": "", "n": "", "s": 0}], ensure_ascii=False))}">{html.escape(word)}</span>'
+            for word in entry.words
+        )
+        parts.append('<div class="verse">')
+        parts.append(f'<div class="vref">{entry.number}</div>')
+        parts.append(f'<p class="line naama">{words}</p>')
+        parts.append(f'<p class="bhavamu">{html.escape(entry.meaning)}</p>')
+        for alternative in entry.alternatives:
+            parts.append(
+                f'<p class="bhavamu alt-gloss">{html.escape(alternative)}</p>'
+            )
+        parts.append("</div>")
+
+    return _page(document.title, "\n".join(parts), depth=1, panel=VERSE_PANEL_JS)
+
+
+def render_library(works: list[tuple[str, str]], entries: dict) -> str:
+    """The front page: the works in the library, each with a way in.
+
+    Distinct from `render_index`, which lists the parts of one work. A library index that
+    presented the Bhāgavatam's twelve skandhams beside a second text as if they were peers
+    would misrepresent the structure.
+    """
+    parts = ['<p class="sub">Click any word for its meaning.</p>']
+    parts.append('<div class="genre-grid">')
+    for title, description in works:
+        links = entries.get(title, [])
+        target = links[0][1].replace("../", "") + ".html" if links else "#"
+        label = links[0][0] if links else ""
+        parts.append(
+            f'<div><a href="{html.escape(target)}">{html.escape(title)}</a> '
+            f'<span class="count">{html.escape(label)}</span><br>'
+            f'<span class="count">{html.escape(description)}</span></div>'
+        )
+    parts.append("</div>")
+    return _page("తెలుగు గ్రంథాలయం", "\n".join(parts), depth=0)
