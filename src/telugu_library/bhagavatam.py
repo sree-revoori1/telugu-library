@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 #     తెభా-1-1-శా.     number and metre joined by a hyphen
 #     తెభా-1-34.శా.    number and metre joined by a period
 #
+#     తెభా-10.1-1518-ఉ.  a *skandham* sub-number: tenth book, first āśvāsam
 #     తెభా-1-189-సీ.   a sīsa verse
 #     తెభా-1-189.1-ఆ.  its āṭaveladi companion, sub-numbered
 #
@@ -50,7 +51,13 @@ from dataclasses import dataclass, field
 # verses at once. Almost nothing in it could align, and that was the entire "morphemes
 # never placed" figure. The metre is also required to be Telugu letters, which is what
 # distinguishes a real id from a decimal.
-VERSE_ID = re.compile(r"తెభా-(\d+)-(\d+(?:\.\d+)?)[.-]([ఀ-౿]{1,6})\.")
+#
+# The skandham may be sub-numbered too, and missing that silently lost two whole books.
+# Pothana's fifth and tenth skandhams are long enough to be split into two āśvāsams, and
+# the source numbers them `5.1`/`5.2` and `10.1`/`10.2`. A pattern allowing only digits
+# there matched nothing on 399 pages of the tenth skandham — a third of the whole work —
+# and the build reported success while skipping it.
+VERSE_ID = re.compile(r"తెభా-(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)[.-]([ఀ-౿]{1,6})\.")
 
 # The editorial gloss, which runs to the end of the verse block.
 GLOSS_MARKER = "టీక:-"
@@ -138,7 +145,8 @@ class Morpheme:
 class Verse:
     """One verse: its identity, its text as printed, and its morphemes."""
 
-    skandham: int
+    # A string, not an integer: a long book is split into āśvāsams and numbered `10.1`.
+    skandham: str
     number: str
     metre: str
     text: str
@@ -215,7 +223,7 @@ def parse_page(text: str, glossed_only: bool = True) -> list[Verse]:
         gloss_block, _, paraphrase = rest.partition(PARAPHRASE_MARKER)
 
         verse = Verse(
-            skandham=int(match.group(1)),
+            skandham=match.group(1),
             number=match.group(2),
             metre=match.group(3),
             text=" ".join(surface.split()),

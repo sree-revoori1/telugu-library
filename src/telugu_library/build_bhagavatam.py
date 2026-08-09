@@ -32,24 +32,33 @@ OUT = ROOT / "site"
 
 PREFIX = "పోతన తెలుగు భాగవతము/"
 
-# The skandhams in reading order, since a dictionary of page titles has no order and a
-# reader expects the first book first.
-SKANDHAMS = [
-    "ప్రథమ స్కంధము",
-    "ద్వితీయ స్కంధము",
-    "తృతీయ స్కంధము",
-    "చతుర్ధ స్కంధము",
-    "పంచమ స్కంధము (ప్రథమాశ్వాసము)",
-    "పంచమ స్కంధము (ద్వితీయాశ్వాసము)",
-    "షష్ఠ స్కంధము",
-    "సప్తమ స్కంధము",
-    "అష్ఠమ స్కంధము",
-    "నవమ స్కంధము",
-    "దశమ స్కంధము (ప్రథమాశ్వాసము)",
-    "దశమ స్కంధము (ద్వితీయాశ్వాసము)",
-    "ఏకాదశ స్కంధము",
-    "ద్వాదశ స్కంధము",
+# The twelve skandhams, in reading order, each with the Wikisource page groups that hold
+# it. The Bhāgavatam has **twelve** books — an earlier version of this list had fourteen
+# entries because Wikisource splits the fifth and tenth into two āśvāsams each and I
+# counted the halves as separate books. They are one skandham apiece, so they are grouped
+# here and displayed as one.
+SKANDHAMS: list[tuple[str, list[str]]] = [
+    ("ప్రథమ స్కంధము", ["ప్రథమ స్కంధము"]),
+    ("ద్వితీయ స్కంధము", ["ద్వితీయ స్కంధము"]),
+    ("తృతీయ స్కంధము", ["తృతీయ స్కంధము"]),
+    ("చతుర్ధ స్కంధము", ["చతుర్ధ స్కంధము"]),
+    (
+        "పంచమ స్కంధము",
+        ["పంచమ స్కంధము (ప్రథమాశ్వాసము)", "పంచమ స్కంధము (ద్వితీయాశ్వాసము)"],
+    ),
+    ("షష్ఠ స్కంధము", ["షష్ఠ స్కంధము"]),
+    ("సప్తమ స్కంధము", ["సప్తమ స్కంధము"]),
+    ("అష్ఠమ స్కంధము", ["అష్ఠమ స్కంధము"]),
+    ("నవమ స్కంధము", ["నవమ స్కంధము"]),
+    (
+        "దశమ స్కంధము",
+        ["దశమ స్కంధము (ప్రథమాశ్వాసము)", "దశమ స్కంధము (ద్వితీయాశ్వాసము)"],
+    ),
+    ("ఏకాదశ స్కంధము", ["ఏకాదశ స్కంధము"]),
+    ("ద్వాదశ స్కంధము", ["ద్వాదశ స్కంధము"]),
 ]
+
+SKANDHAM_NAMES = [name for name, _ in SKANDHAMS]
 
 
 def page_list() -> list[str]:
@@ -76,15 +85,16 @@ def main(argv: list[str] | None = None) -> int:
     wanted = SKANDHAMS if args.all else [SKANDHAMS[args.skandham - 1]]
 
     by_skandham: dict[str, list[str]] = defaultdict(list)
-    for title in pages:
-        for name in wanted:
-            if title.startswith(PREFIX + name + "/"):
-                by_skandham[name].append(title)
+    for name, groups in wanted:
+        for group in groups:
+            for title in pages:
+                if title.startswith(PREFIX + group + "/"):
+                    by_skandham[name].append(title)
 
     total_verses = total_morphemes = glossed = labelled = 0
     built: dict[str, list[tuple[str, str]]] = defaultdict(list)
 
-    for name in wanted:
+    for name, _ in wanted:
         titles = sorted(by_skandham.get(name, []))
         if not titles:
             continue
@@ -118,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     # The front page, listing the skandhams in reading order rather than by size — a
     # reader of the Bhāgavatam expects the first book first.
-    ordered = {name: built[name] for name in SKANDHAMS if name in built}
+    ordered = {name: built[name] for name in SKANDHAM_NAMES if name in built}
     site.write(
         args.out / "index.html",
         site.render_index(
