@@ -140,6 +140,52 @@ genre_page = site.render_genre("పురాణాలు", [("శ్రీమద
 check("../text/abc123.html" in genre_page, "a genre page links to its texts")
 
 
+# --- Telugu vs Sanskrit ---------------------------------------------------
+
+from telugu_library.language import is_sanskrit, sanskrit_share
+
+# The finding that mattered most: Wikisource's epic category is dominated by the
+# Vālmīki Rāmāyaṇam, which is Sanskrit in Telugu script. A Telugu analyser produces
+# confident nonsense on it, so it must be detected and left unglossed.
+sanskrit = "తతః సర్గః తస్మాత్ దేశాత్ ప్రతస్థిరే రామస్య వృక్షౌ " * 20
+telugu = "ఆ ఇల్లు చాలా పెద్దది అని అతను చెప్పాడు కూడా వారు వచ్చి ఉన్నారు " * 20
+check(is_sanskrit(sanskrit), "Sanskrit in Telugu script is detected",
+      f"share={sanskrit_share(sanskrit):.2f}")
+check(not is_sanskrit(telugu), "Telugu is not flagged as Sanskrit",
+      f"share={sanskrit_share(telugu):.2f}")
+# Too short to judge — a title can hit any ratio by accident.
+check(not is_sanskrit("సర్గః"), "a short string is not judged")
+
+document = parse("S", sanskrit, analyser, lexicon=_Analyser.lexicon)
+eq(document.language, "sanskrit", "a Sanskrit document is labelled")
+eq(document.analysed_count, 0, "Sanskrit is not glossed at all")
+
+
+# --- Coverage counting ----------------------------------------------------
+
+# Regression: an uninflected word analyses to itself with no steps, and that is the
+# correct answer — most Telugu tokens in running text are uninflected. Requiring a
+# suffix to have been peeled marked `ఈ` (294,297 occurrences) and `మీ` (148,590) as
+# failures and understated coverage by fifty points.
+class _Uninflected:
+    lexicon = {"ఈ": 294297}
+
+    def analyse(self, word, max_results=8):
+        return [_Reading("ఈ", "determiner", "determiner", steps=0)]
+
+
+plain = parse("U", "ఈ", _Uninflected(), lexicon=_Uninflected.lexicon)
+token = plain.lines[0].tokens[0]
+eq(token.unanalysed, False,
+   "regression: an attested uninflected word counts as glossed")
+eq(plain.coverage, 100.0, "coverage counts it")
+
+# Telugu digits are not words. `[ఀ-౿]` wrongly includes U+0C66-6F, so every verse
+# number written in Telugu numerals was sent to the analyser.
+eq(Token(surface="౧౨౩").is_telugu, False, "Telugu digits are not word tokens")
+eq(Token(surface="౬౪").is_telugu, False, "a two-digit Telugu numeral is not a word")
+
+
 # --- Report ---------------------------------------------------------------
 
 print()

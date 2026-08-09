@@ -26,9 +26,17 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-# A run of Telugu characters. Everything else — spaces, punctuation, digits, the Latin
-# text of an editorial note — is passed through untouched.
-TELUGU_RUN = re.compile(r"[ఀ-౿]+")
+from .language import language_of
+
+# A run of Telugu *letters*. Everything else — spaces, punctuation, the Latin text of
+# an editorial note — is passed through untouched.
+#
+# The range deliberately excludes U+0C66–U+0C6F, the Telugu digits ౦౧౨౩౪౫౬౭౮౯. A
+# naive `[ఀ-౿]` includes them, so every verse number written in Telugu numerals was
+# sent to the analyser as if it were a word. In the Vālmīki Rāmāyaṇam that is a large
+# share of all tokens — `౩`, `౬౪`, `౨` were among the commonest "unanalysed words" —
+# and counting them as failures understated coverage badly.
+TELUGU_RUN = re.compile(r"[\u0C00-\u0C65\u0C70-\u0C7F]+")
 
 # Verse-form markers, which open a line and name its metre. Recognised so the reader can
 # lay out a padyam as a padyam.
@@ -89,6 +97,10 @@ class Document:
     revision: int = 0
     genre: str = ""
     path: list[str] = field(default_factory=list)
+    # "telugu" or "sanskrit". A large part of Wikisource's epic category is the Vālmīki
+    # Rāmāyaṇam, which is Sanskrit in Telugu script — see `language.py`. Recorded so the
+    # page can say so and so coverage is not averaged across two languages.
+    language: str = "telugu"
 
     @property
     def token_count(self) -> int:
@@ -160,13 +172,21 @@ def parse(
     line-breaking produces.
     """
     lexicon = lexicon if lexicon is not None else getattr(analyser, "lexicon", None)
+    # Sanskrit is not glossed at all. A Telugu analyser applied to Sanskrit does not
+    # fail cleanly — it produces confident nonsense, reading the locative `సూర్యే` as a
+    # participle of an invented verb `సూర్యు` — and a wrong gloss on a scriptural line
+    # is worse than none.
+    language = language_of(text)
+    gloss = language == "telugu"
     lines: list[Line] = []
     for raw in text.splitlines():
         verse_match = VERSE_NUMBER.search(raw)
         tokens: list[Token] = []
         for part in _split_line(raw):
             token = Token(surface=part)
-            if token.is_telugu:
+            if token.is_telugu and not gloss:
+                token.unanalysed = True
+            elif token.is_telugu:
                 readings = analyser.analyse(part, max_results=max_alternatives)
                 if readings:
                     best = readings[0]
@@ -188,12 +208,25 @@ def parse(
                     #
                     # Verb citation forms are exempt, since Telugu barely writes them:
                     # `పరిశీలించు` occurs zero times against 205 for its inflections.
+                    # The one test that matters: is the proposed lemma a word?
+                    #
+                    # An earlier version also required the reading to have *steps* —
+                    # some suffix peeled off — and that was simply wrong. Most Telugu
+                    # tokens in running text are uninflected, so `ఈ` (this, 294,297
+                    # occurrences), `మీ` (your, 148,590) and `తన` (own, 111,810)
+                    # analyse to themselves with no steps, which is the correct answer.
+                    # Marking them unanalysed made the commonest words in the language
+                    # look like failures and understated coverage badly.
+                    #
+                    # A fragment is excluded by the attestation test alone:
+                    # `డాఢ్యుఁడు` yields the "lemma" `డాఢ్యుడు`, which occurs zero
+                    # times in 33 million words.
+                    #
+                    # Verb citation forms are exempt, since Telugu barely writes them:
+                    # `పరిశీలించు` occurs zero times against 205 for its inflections.
                     attested = bool(lexicon.get(best.lemma, 0)) if lexicon else True
                     productive = best.pos == "verb" and best.lemma.endswith("ు")
-                    token.unanalysed = (
-                        (best.lemma == part and not best.path.steps)
-                        or not (attested or productive)
-                    )
+                    token.unanalysed = not (attested or productive)
                     token.alternatives = [
                         (r.lemma, r.tag)
                         for r in readings[1:]
@@ -216,4 +249,5 @@ def parse(
         revision=revision,
         genre=genre,
         path=path or [],
+        language=language,
     )

@@ -64,6 +64,7 @@ a { color: var(--link); }
 #panel .lemma { color: var(--link); }
 #panel .tag { color: var(--dim); font-family: ui-monospace, monospace; font-size: .8rem; }
 #panel .alt { color: var(--dim); font-size: .8rem; }
+#panel .dict { font-size: .8rem; }
 #panel .close { float: right; cursor: pointer; color: var(--dim); }
 ul.works { list-style: none; padding: 0; }
 ul.works li { padding: .35rem 0; border-bottom: 1px solid var(--rule); }
@@ -86,7 +87,10 @@ PANEL_JS = """
     var html = '<span class="close">close</span>'
       + '<span class="surface">' + w.textContent + '</span> &nbsp; '
       + '<span class="lemma">' + w.dataset.lemma + '</span> &nbsp; '
-      + '<span class="tag">' + w.dataset.tag + '</span>';
+      + '<span class="tag">' + w.dataset.tag + '</span>'
+      + ' &nbsp; <a class="dict" target="_blank" rel="noopener" href="'
+      + 'https://andhrabharati.com/dictionary/?w=' + encodeURIComponent(w.dataset.lemma)
+      + '">dictionary &rarr;</a>';
     if (alts.length) {
       html += '<div class="alt">also: ' + alts.map(function (a) {
         return a[0] + ' ' + a[1];
@@ -134,11 +138,22 @@ def render_document(document: Document, depth: int = 1) -> str:
     breadcrumb = " › ".join(html.escape(p) for p in document.path)
     parts.append(f'<h2>{breadcrumb}</h2>')
     parts.append(f"<h1>{html.escape(document.title)}</h1>")
-    parts.append(
-        f'<p class="sub">{document.token_count:,} Telugu words · '
-        f"{document.coverage:.0f}% with a morphological gloss · "
-        f'<a href="{html.escape(document.url)}">source</a></p>'
-    )
+    if document.language == "sanskrit":
+        # Said plainly rather than left as a silent 0%. A reader who finds an unglossed
+        # page deserves to know it is unglossed *because the text is Sanskrit*, not
+        # because the analyser is broken.
+        parts.append(
+            f'<p class="sub">{document.token_count:,} words · '
+            "Sanskrit in Telugu script, so not glossed — this project analyses "
+            "Telugu · "
+            f'<a href="{html.escape(document.url)}">source</a></p>'
+        )
+    else:
+        parts.append(
+            f'<p class="sub">{document.token_count:,} Telugu words · '
+            f"{document.coverage:.0f}% with a morphological gloss · "
+            f'<a href="{html.escape(document.url)}">source</a></p>'
+        )
 
     parts.append('<div class="stanza">')
     for line in document.lines:
