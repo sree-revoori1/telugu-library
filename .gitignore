@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+# The generated site is a build artifact; the build is reproducible from data/.
+site/

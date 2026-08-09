@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telugu-library"
+version = "0.1.0"
+description = "A parsing reader for Telugu literature"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+# telugu-morph is the only dependency and is not on PyPI, so it is installed from
+# git rather than declared here — a declared VCS dependency cannot be published.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/sree-revoori1/telugu-library"
+
+[tool.setuptools.packages.find]
+where = ["src"]
