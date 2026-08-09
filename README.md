@@ -111,25 +111,45 @@ first full run takes a few hours.
 
 ## Publish it
 
-The site is static, so it hosts anywhere that serves files. GitHub Pages, end to end:
+The site is a folder of static files, so it hosts anywhere. **This repository is
+private, which rules out GitHub Pages** — Pages needs a public repository on the free
+plan. Two paths that work regardless:
 
-1. Push the repository to GitHub.
-2. **Settings → Pages → Source: GitHub Actions.** Not "Deploy from a branch" — the
-   included workflow builds the site rather than committing it.
-3. Push to `main`, or run the workflow manually from the **Actions** tab.
-4. The site appears at `https://<user>.github.io/telugu-library/`.
-
-`.github/workflows/build.yml` does the rest: installs telugu-morph, runs the tests,
-builds every text, and deploys. It caches the fetched corpus, so only the first run pays
-the fetch cost, and it re-runs weekly because Wikisource's texts are edited continuously
-and a library that never refetches drifts away from its sources.
-
-Any other static host works the same way — `site/` is the whole artifact:
+**Cloudflare Pages** (free, private source, custom domain, one command):
 
 ```sh
-npx wrangler pages deploy site      # Cloudflare Pages
-netlify deploy --dir=site --prod    # Netlify
+PYTHONPATH=src:../telugu-morph/src python3 -m telugu_library.build --all
+npx wrangler pages deploy site --project-name telugu-library
 ```
+
+**Netlify** (same idea):
+
+```sh
+netlify deploy --dir=site --prod
+```
+
+Either gives a public URL while the code stays private. If you would rather use GitHub
+Pages, make the repository public and add a deploy step — the workflow is one job away
+from it, and the commit history explains what to add.
+
+### The CI build
+
+`.github/workflows/build.yml` runs the tests, builds every text, and uploads the site as
+a downloadable artifact on each push and weekly. It deliberately does *not* deploy, for
+the reason above.
+
+It needs one secret, because telugu-morph is also private:
+
+1. Create a fine-grained personal access token with **read** access to `telugu-morph`.
+2. Add it to this repository as **Settings → Secrets and variables → Actions → New
+   repository secret**, named `ACCESS_TOKEN`.
+
+The default `GITHUB_TOKEN` will not do: it is scoped to this repository alone and cannot
+read another private one. Without the secret the build fails at checkout with `could not
+read Username for 'https://github.com'`.
+
+The workflow caches the fetched corpus, so only the first run pays the several-hour
+fetch, and the weekly rebuild exists because Wikisource is edited continuously.
 
 ## Layout
 
