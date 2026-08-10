@@ -30,9 +30,22 @@ ANNOTATED = ROOT / "data" / "vemana" / "annotated.json"
 REFRAIN = {"విశ్వద", "అభిరామ", "వినుర", "వేమ"}
 
 # గసడదవాదేశ: an unvoiced stop at a word's start voices after a preceding vowel.
+# `ప` has two outcomes, not one: it goes to `వ` in `ప్రొద్దు` → `వ్రొద్దు` but to `బ` in
+# `పట్టవచ్చు` → `బట్టవచ్చు` and `పూనుదురో` → `బూనుదురో`. Listing only `వ` reported three
+# correct glosses as missing.
 VOICING = {"క": "గ", "చ": "జ", "ట": "డ", "త": "ద", "ప": "వ"}
+VOICING_ALT = {"ప": "బ"}
 
 VOWELS = "అఆఇఈఉఊఎఏఐఒఓఔ"
+
+# An independent vowel letter becomes a *matra* on the preceding consonant when the words
+# join, because Telugu is an abugida: `కాశివాసులు` + `ఐన` is written `కాశివాసులైన`, where
+# `ఐ` survives only as the sign `ై`. Comparing the letter against the line therefore fails
+# on a word that is plainly there — which is what happened to `ఐన`, `ఇట`, `ఒక` and `ఊరు`.
+TO_MATRA = {
+    "అ": "", "ఆ": "ా", "ఇ": "ి", "ఈ": "ీ", "ఉ": "ు", "ఊ": "ూ",
+    "ఎ": "ె", "ఏ": "ే", "ఐ": "ై", "ఒ": "ొ", "ఓ": "ో", "ఔ": "ౌ",
+}
 
 
 # Endings a citation form carries that the printed line may not. The gloss lists the
@@ -77,10 +90,14 @@ def variants(form: str) -> set[str]:
     out = {form}
     if form and form[0] in VOICING:
         out.add(VOICING[form[0]] + form[1:])
+    if form and form[0] in VOICING_ALT:
+        out.add(VOICING_ALT[form[0]] + form[1:])
     # A vowel-initial morpheme loses its onset to the previous word's final consonant,
     # so what survives in the printed line is the remainder.
     if len(form) > 1 and form[0] in VOWELS:
         out.add(form[1:])
+        # …or the vowel survives as a matra written on that consonant.
+        out.add(TO_MATRA[form[0]] + form[1:])
     # The stem of a citation form, which is what a running line usually shows.
     for tail in CITATION_TAILS:
         if len(form) > len(tail) + 1 and form.endswith(tail):
@@ -88,8 +105,11 @@ def variants(form: str) -> set[str]:
             out.add(stem)
             if stem and stem[0] in VOICING:
                 out.add(VOICING[stem[0]] + stem[1:])
+            if stem and stem[0] in VOICING_ALT:
+                out.add(VOICING_ALT[stem[0]] + stem[1:])
             if len(stem) > 1 and stem[0] in VOWELS:
                 out.add(stem[1:])
+                out.add(TO_MATRA[stem[0]] + stem[1:])
     return {v for v in out if len(v) >= 2}
 
 
@@ -101,7 +121,10 @@ def main() -> int:
     unmatched: list[tuple[str, str]] = []
     total = 0
     for key, verse in data.items():
-        text = "".join(verse["lines"])
+        # Spaces are removed as well as line breaks. Classical printing breaks on the
+        # metre, so a single word is routinely set as two: `తెలుసగూడదు` appears as
+        # `దెలుసగూడ దంత్యము`. Comparing against the spaced line reports it missing.
+        text = "".join("".join(verse["lines"]).split())
         for form, _ in verse["gloss"]:
             if form in REFRAIN:
                 continue

@@ -29,6 +29,11 @@ TITLE = "వేమన శతకము"
 # shown the same four glosses a hundred times as though they were new.
 REFRAIN_WORDS = frozenset({"విశ్వద", "అభిరామ", "వినుర", "వేమ"})
 
+# The source prints 146 verses but only 141 distinct ones: five are set twice, with
+# identical text. Both numbers are kept, because a reader following a citation wants the
+# verse at the number they were given, and the repetition is the source's rather than ours.
+DUPLICATE_PAIRS = ((31, 41), (37, 40), (45, 62), (76, 87), (80, 90))
+
 
 @dataclass
 class Morpheme:
