@@ -2,3 +2,9 @@ __pycache__/
 *.pyc
 # The generated site is a build artifact; the build is reproducible from data/.
 site/
+# The annotation store is derived too — `ingest --all` rebuilds it from the page cache
+# in a few minutes, and 128 MB of SQLite does not belong in git history. Ship the
+# recipe, not the artifact.
+data/library.db
+data/library.db-wal
+data/library.db-shm

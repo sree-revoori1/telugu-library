@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from . import site
-from . import build_bhagavatam, build_sahasranamam
+from . import build_bhagavatam, build_from_store, build_sahasranamam
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "site"
@@ -37,10 +37,22 @@ WORKS = [
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=OUT)
+    parser.add_argument(
+        "--inline",
+        action="store_true",
+        help="use the older renderer that inlines the analysis into the markup",
+    )
     args = parser.parse_args(argv)
 
     print("=== Bhāgavatam")
-    build_bhagavatam.main(["--all", "--out", str(args.out)])
+    if args.inline:
+        build_bhagavatam.main(["--all", "--out", str(args.out)])
+    else:
+        # Through the store: ingest once, then render from it. Slower on a cold cache by
+        # the cost of one ingest, and far faster for everything afterwards — re-rendering
+        # takes ~3 s against ~5 min to re-parse, and the pages come out at 41 KB rather
+        # than 141 KB because the analysis is fetched instead of inlined.
+        build_from_store.main(["--out", str(args.out), "--ingest"])
     print("\n=== Sahasranāmam")
     build_sahasranamam.main(["--out", str(args.out)])
 

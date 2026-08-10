@@ -247,6 +247,127 @@ eq(split_gloss("అ = ఒకటి; ఇ = రెండు"), [("అ", "ఒకట
    "gloss pairs split on semicolons")
 
 
+# --- The annotation store -------------------------------------------------
+# The store exists so the analysis is queryable rather than embedded in markup. What
+# needs testing is not that SQLite works, but that the four decisions which are expensive
+# to reverse actually hold: the path hierarchy, id-based joins, the many-to-many link, and
+# versioned provenance.
+
+from telugu_library import store as store_module
+
+_conn = store_module.connect(":memory:", fresh=False)
+_writer = store_module.Writer(_conn)
+_src = _writer.add_source("test", title="a test", kind="editorial")
+_corpus = _writer.add_node("corpus", label="c", urn="c")
+_work = _writer.add_node("work", label="w", parent_id=_corpus, urn="w")
+_book = _writer.add_node("book", label="b", parent_id=_work, urn="w:1")
+
+
+class _M:
+    """A stand-in for bhagavatam.Morpheme, so the store is tested without a network."""
+
+    def __init__(self, form, gloss, shared=False, pos=None):
+        self.form, self.gloss, self.shared, self.pos = form, gloss, shared, pos
+        self.etymology = None
+        self.is_suffix = False
+
+
+# A morpheme straddling two tokens, which is the case a tree cannot represent:
+# `ఆరూఢుండు` has characters in both printed tokens.
+_m1 = _M("పరికర", "సన్నాహము")
+_m2 = _M("ఆరూఢుండు", "ఎక్కినవాడు", shared=True)
+_m3 = _M("అగున్", "అవును")
+_verse = _writer.add_verse(
+    _book,
+    urn="w:1.1",
+    ref="1-1",
+    alignment=[("పరికరారూఢుం", [_m1, _m2]), ("డగు", [_m2, _m3])],
+    morphemes=[_m1, _m2, _m3],
+    paraphrase="ఒక భావము",
+    metre_code="సీ",
+    metre_name="సీస పద్యము",
+    source_id=_src,
+)
+_conn.commit()
+
+# The materialized path makes a subtree one indexed prefix match. Depth is derived, not
+# stored twice.
+eq(len(store_module.subtree(_conn, _work, "verse")), 1,
+   "a subtree query finds the verse under the work")
+eq(len(store_module.subtree(_conn, _book, "verse")), 1,
+   "...and under the book")
+_paths = [r["path"] for r in _conn.execute(
+    "SELECT path FROM node ORDER BY path").fetchall()]
+check(all(_paths[i] < _paths[i + 1] for i in range(len(_paths) - 1)),
+      "paths sort in tree order, which is what makes ORDER BY path correct")
+eq(_conn.execute("SELECT depth FROM node WHERE id=?", (_verse,)).fetchone()[0], 4,
+   "depth follows from the path")
+
+# The many-to-many link, and the flag that says why it exists. A shared morpheme is one
+# row per token, not a duplicated morpheme.
+eq(_conn.execute("SELECT COUNT(*) FROM morpheme WHERE node_id=?",
+                 (_verse,)).fetchone()[0], 3,
+   "a straddling morpheme is stored once, not once per token")
+eq(_conn.execute(
+    "SELECT COUNT(*) FROM token_morpheme WHERE shared=1").fetchone()[0], 2,
+   "...and linked to both tokens it has characters in")
+eq(_conn.execute("SELECT COUNT(*) FROM token WHERE node_id=?",
+                 (_verse,)).fetchone()[0], 2, "both printed tokens are stored")
+
+# Ordinals are the join key, so a payload cannot silently shift. Reading back the
+# alignment must reproduce it exactly.
+_payload = store_module.verse_payload(_conn, _verse)
+eq([t["t"] for t in _payload["tokens"]], ["పరికరారూఢుం", "డగు"],
+   "tokens round-trip in printed order")
+eq([m["f"] for m in _payload["tokens"][0]["m"]], ["పరికర", "ఆరూఢుండు"],
+   "the first token's morphemes round-trip")
+eq([m["f"] for m in _payload["tokens"][1]["m"]], ["ఆరూఢుండు", "అగున్"],
+   "the straddling morpheme appears under the second token too")
+eq(_payload["paraphrase"], "ఒక భావము", "the verse paraphrase round-trips")
+check(_payload["tokens"][0]["m"][1]["s"] == 1,
+      "the reader is told the morpheme spans the line break")
+
+# Provenance: a correction supersedes rather than overwrites, so history survives and the
+# UI can distinguish a scholar's reading from an inferred one.
+_mid = _conn.execute(
+    "SELECT id FROM morpheme WHERE node_id=? AND ordinal=0", (_verse,)).fetchone()[0]
+_old = _conn.execute(
+    "SELECT id FROM gloss WHERE morpheme_id=? AND superseded_by IS NULL",
+    (_mid,)).fetchone()[0]
+_new = _conn.execute(
+    "INSERT INTO gloss (morpheme_id, text, confidence, annotator)"
+    " VALUES (?,?,?,?)", (_mid, "సన్నాహము (సరిదిద్దినది)", 0.8, "a scholar")
+).lastrowid
+_conn.execute("UPDATE gloss SET superseded_by=? WHERE id=?", (_new, _old))
+_conn.commit()
+eq(_conn.execute(
+    "SELECT COUNT(*) FROM gloss WHERE morpheme_id=? AND superseded_by IS NULL",
+    (_mid,)).fetchone()[0], 1, "exactly one gloss is live after a correction")
+eq(_conn.execute("SELECT COUNT(*) FROM gloss WHERE morpheme_id=?",
+                 (_mid,)).fetchone()[0], 2, "...and the superseded one is retained")
+eq(store_module.verse_payload(_conn, _verse)["tokens"][0]["m"][0]["g"],
+   "సన్నాహము (సరిదిద్దినది)", "the payload serves the live gloss")
+check(store_module.verse_payload(_conn, _verse)["tokens"][0]["m"][0]["c"] == 0.8,
+      "a non-editorial gloss carries its confidence into the payload")
+
+# The queries that were impossible while HTML was the database.
+eq(len(store_module.concordance(_conn, "అగున్")), 1,
+   "concordance finds every occurrence of a morpheme")
+eq(store_module.senses(_conn, "పరికర")[0]["gloss"], "సన్నాహము (సరిదిద్దినది)",
+   "senses reports the live gloss")
+check(any(r["urn"] == "w:1.1" for r in store_module.search(_conn, "పరికరారూఢుం")),
+      "full-text search finds the verse")
+
+# A duplicated citation must be refused rather than silently double-counted. This is the
+# constraint that found 32 verses being counted twice in the real corpus.
+try:
+    _writer.add_node("verse", parent_id=_book, urn="w:1.1")
+    check(False, "a duplicate urn is refused")
+except Exception:
+    check(True, "a duplicate urn is refused")
+_conn.rollback()
+
+
 # --- Report ---------------------------------------------------------------
 
 print()

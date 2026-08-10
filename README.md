@@ -79,6 +79,60 @@ and only the second carries a gloss, covering both halves. Parsed separately, th
 dropped and the continuation received a gloss twice the length of its text. That single
 issue was the whole of the residual 6.2%.
 
+## The data layer
+
+The analysis lives in **`data/library.db`**, a SQLite store between alignment and
+rendering. Before it existed the morphemes were only `data-` attributes inside 687
+generated HTML files averaging 141 KB, which made the site the database — so search
+across texts, correcting one gloss, accepting an emendation, versioning an annotation,
+serving an API and exporting CoNLL-U were each a rewrite of `site.py` rather than a query.
+
+```
+wikisource cache → ingest → library.db → render → site/
+```
+
+| | |
+|---|---|
+| Verses | 8,980 |
+| Tokens | 230,909 |
+| Morphemes | 293,555 |
+| Token↔morpheme links | 338,098 (**87,636 shared across a line break**) |
+| Distinct morpheme forms | 74,566 |
+
+The shape follows Perseus' Scaife ATLAS, because it solves the problem this text has:
+**overlapping hierarchies.** A verse is a unit of citation, a line is a unit of printing,
+and a word belongs to both without either containing the other.
+
+Four decisions that are expensive to reverse:
+
+1. **Materialized path** on `node` (`corpus → work → book → section → verse`), so a
+   subtree is one indexed prefix match rather than a recursive query.
+2. **Layers join to token and morpheme *ids*, never character offsets.** The cautionary
+   case is VedaWeb: ~13 layers aligned positionally, and 63 of 428 stanzas in Book 2 now
+   disagree about their own token count. Ids cannot drift; offsets do the moment someone
+   fixes a typo.
+3. **`token_morpheme` is many-to-many.** TEITOK's `<tok>`/`<dtok>` is the right model but
+   assumes each morpheme nests inside one token. Ours cannot: `ఆరూఢుండు` has characters in
+   both `పరికరస్యందనారూఢుం` and `డగు`. A tree would force a wrong parent — the exact bug
+   that made three earlier aligners useless — so the link is its own row, carrying `shared`.
+4. **Provenance and confidence on every gloss.** Editorial `టీక`, dictionary lookup,
+   computed guess and human correction coexist in one table and stay distinguishable, and
+   a correction supersedes rather than overwrites, so history survives.
+
+**The store immediately caught a miscount.** Wikisource's section boundaries overlap: 32
+verses are printed on two pages apiece, because a story's boundary is editorial and both
+sections claim the verses that straddle it. 8,980 distinct + 32 repeats = the **9,012**
+this project had been reporting, which the HTML pipeline had no way to notice.
+
+Pages are now **41 KB, down from 141 KB**, because the analysis is fetched per section
+instead of inlined per word. That makes it an API by construction — `data/<slug>.json` is
+already what a client would ask for.
+
+```sh
+PYTHONPATH=src python3 -m telugu_library.ingest --all            # → data/library.db
+PYTHONPATH=src python3 -m telugu_library.build_from_store        # → site/
+```
+
 ## Read it locally
 
 ```sh
@@ -128,13 +182,17 @@ purged and refusals now raise rather than being recorded as absences.
 src/telugu_library/
   wikisource.py     fetching, with provenance and the User-Agent Wikimedia requires
   bhagavatam.py     verse parsing, the టీక gloss, and character-stream alignment
-  site.py           static HTML: the verse page and the morpheme panel
-  build_bhagavatam.py   the annotated build
+  store.py          the SQLite annotation store — hierarchy, tokens, morphemes, layers
+  ingest.py         cached pages → library.db
+  render.py         library.db → static pages + fetched analysis payloads
+  build_from_store.py   the build, in three separable stages
+  site.py           shared CSS and the older inline-payload renderer
   serve.py          read it locally
   catalogue.py      the wider Wikisource catalogue, 4,842 texts
   language.py       Telugu vs Sanskrit-in-Telugu-script, by word ending
   andhrabharati.py  dictionary lookup, cached permanently
 data/bhagavatam-pages.json   the 912 Bhāgavatam pages
+data/library.db              the annotation store
 ```
 
 ## Notes for anyone touching this
@@ -165,6 +223,16 @@ until the glosses were read rather than counted.
 
 **Averaging a metric across two languages describes neither.** Coverage is reported for
 Telugu texts only, with Sanskrit counted separately.
+
+**A UNIQUE constraint is a measurement.** Adding one on `node.urn` immediately found 32
+verses being counted twice, which had been inflating the headline verse figure for weeks.
+The HTML pipeline wrote each page independently and so could not have noticed. Where a
+number matters, give the store a way to refuse the wrong one.
+
+**One verse's gloss describes more text than the verse prints.** `bhagavatam:4.969` has
+5 printed tokens and 18 morphemes, so 22 morphemes across the corpus (0.01%) attach to no
+token. This is a source quirk, not an alignment failure — the old pipeline dropped them
+silently, and the store keeps them queryable instead.
 
 ## Licence
 
