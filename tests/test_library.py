@@ -9,6 +9,8 @@ corpus is absent, so the file is always runnable.
 
 from __future__ import annotations
 
+import json
+import re
 import sys
 from pathlib import Path
 
@@ -366,6 +368,54 @@ try:
 except Exception:
     check(True, "a duplicate urn is refused")
 _conn.rollback()
+
+
+# --- Every text has a builder, and the index links to it ------------------
+# The bug this guards against: the Vemana analysis was complete — 146 verses, 2,091
+# morphemes, validated — and the site showed none of it. There was no builder, nothing
+# linked to the page, and the file in `site/` was a leftover from a manual run holding 3
+# verses. Every check passed the whole time, because nothing tested that a finished text
+# reaches the reader.
+
+from telugu_library import build_all, build_vemana, vemana as vemana_module
+
+_vemana = vemana_module.load()
+eq(len(_vemana), 146, "all 146 Vemana verses load")
+check(
+    all(v.morphemes for v in _vemana),
+    "every Vemana verse carries an analysis",
+)
+eq(
+    sum(1 for v in _vemana for m in v.morphemes if not m.is_refrain), 2091,
+    "the content morpheme count is what the validator checked",
+)
+
+# Each work named in the library index must have an entry pointing somewhere, and each
+# builder must be reachable from `build_all` — the two halves of "the reader can find it".
+_titles = {title for title, _ in build_all.WORKS}
+check("వేమన శతకము" in _titles, "Vemana is listed in the library index")
+check("విష్ణు సహస్రనామ స్తోత్రము" in _titles, "the Sahasranāmam is listed")
+check("పోతన తెలుగు భాగవతము" in _titles, "the Bhāgavatam is listed")
+eq(build_vemana.SLUG, "vemana-satakam", "the Vemana page has a stable slug")
+
+# The renderer returns (html, payload) and must not inline the analysis. Inlining made
+# this page 7.3 MB for 146 short verses, because 143 distinct payloads were copied into
+# 2,015 word attributes.
+_html, _payload = site.render_vemana(_vemana)
+check("data-m=" not in _html, "the Vemana page does not inline its analysis")
+check('data-payload="' in _html, "...it points at a fetched payload instead")
+check(
+    len(_html.encode()) < 400_000,
+    "the page stays small",
+    f"{len(_html.encode()) / 1024:.0f} KB",
+)
+_parsed = json.loads(_payload)
+eq(len(_parsed), 146, "the payload covers every verse")
+_referenced = set(re.findall(r'data-v="(\d+)"', _html))
+check(
+    _referenced and _referenced <= set(_parsed),
+    "every clickable word resolves to a payload entry",
+)
 
 
 # --- Report ---------------------------------------------------------------

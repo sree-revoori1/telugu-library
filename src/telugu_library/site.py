@@ -106,16 +106,27 @@ PANEL_JS = """
 """
 
 
-def _page(title: str, body: str, depth: int = 0, panel: str | None = None) -> str:
-    """One HTML page. `depth` sets how far back the root is, for relative links."""
+def _page(
+    title: str,
+    body: str,
+    depth: int = 0,
+    panel: str | None = None,
+    payload: str = "",
+) -> str:
+    """One HTML page. `depth` sets how far back the root is, for relative links.
+
+    `payload` is the URL of a JSON analysis file for pages that fetch it rather than
+    inlining it into the markup.
+    """
     up = "../" * depth
+    attribute = f' data-payload="{html.escape(payload)}"' if payload else ""
     return f"""<!DOCTYPE html>
 <html lang="te">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title>
 <style>{CSS}{VERSE_CSS}</style>
-<body>
+<body{attribute}>
 <div class="wrap">
 <header><h1><a href="{up}index.html">తెలుగు గ్రంథాలయం</a></h1>
 <p class="sub">A parsing reader for Telugu literature</p></header>
@@ -400,3 +411,105 @@ def render_library(works: list[tuple[str, str]], entries: dict) -> str:
         )
     parts.append("</div>")
     return _page("తెలుగు గ్రంథాలయం", "\n".join(parts), depth=0)
+
+
+def render_vemana(verses, url: str = "") -> tuple[str, str]:
+    """Vemana's verses with the word-by-word analysis, as (html, payload_json).
+
+    The provenance line is deliberately explicit. For the Bhāgavatam the gloss is a
+    scholar's, quoted; here it is this project's own analysis, and a reader deserves to
+    know which they are looking at before they rely on it.
+
+    The analysis is fetched rather than inlined. Writing it into each word's `data-m`
+    made a page of 146 short verses **7.3 MB**: there are only 143 distinct payloads, one
+    per verse, but they were copied into 2,015 word attributes, so 98% of the file was
+    duplication. Each word now carries its verse number and its index, and the panel
+    looks the analysis up in one fetched object.
+    """
+    parts: list[str] = [f"<h1>{html.escape(TITLE_VEMANA)}</h1>"]
+    morphemes = sum(len(v.morphemes) for v in verses)
+    parts.append(
+        f'<p class="sub">{len(verses):,} verses · {morphemes:,} morphemes · '
+        "the word-by-word analysis here is this project's own, not a scholar's — "
+        "no published gloss of Vemana exists online</p>"
+    )
+
+    payload: dict[str, dict] = {}
+    for verse in verses:
+        parts.append('<div class="verse">')
+        parts.append(f'<div class="vref">{verse.reference}</div>')
+        # Vemana's verses are short and the source lists morphemes per verse rather than
+        # per token, so the whole verse shares one entry — simpler and less error-prone
+        # than the Bhāgavatam's per-token alignment, which it does not need.
+        key = str(verse.number)
+        payload[key] = {
+            "m": [{"f": m.form, "g": m.gloss} for m in verse.morphemes]
+        }
+        for line in verse.lines:
+            words = " ".join(
+                f'<span class="w" data-v="{key}">{html.escape(word)}</span>'
+                for word in line.split()
+            )
+            parts.append(f'<p class="line verse-line">{words}</p>')
+        parts.append("</div>")
+
+    document = _page(
+        TITLE_VEMANA, "\n".join(parts), depth=1, panel=VEMANA_PANEL_JS,
+        payload="../data/vemana-satakam.json",
+    )
+    return document, json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+# The Vemana panel. One fetch for the whole text, then every click is a dictionary lookup.
+# Shows the verse's morphemes rather than a single word's, which is what the hand analysis
+# records — and says so, so the reader is not left thinking the panel misfired.
+VEMANA_PANEL_JS = """
+(function () {
+  var panel = document.getElementById('panel');
+  if (!panel) return;
+  var url = document.body.dataset.payload;
+  var data = null, pending = null;
+
+  function load() {
+    if (data) return Promise.resolve(data);
+    if (!pending) {
+      pending = fetch(url).then(function (r) { return r.json(); })
+        .then(function (j) { data = j; return j; });
+    }
+    return pending;
+  }
+
+  document.addEventListener('click', function (e) {
+    var w = e.target.closest ? e.target.closest('.w') : null;
+    if (!w) return;
+    var key = w.dataset.v;
+    panel.innerHTML = '<span class="close">close</span><div class="surface">'
+      + w.textContent + '</div><div class="mrow dim">…</div>';
+    panel.classList.add('on');
+    load().then(function (j) {
+      var entry = j[key];
+      if (!entry) return;
+      var rows = entry.m.map(function (m) {
+        return '<div class="mrow"><span class="lemma">' + m.f + '</span>'
+          + ' &nbsp; <span class="tel">' + m.g + '</span>'
+          + ' &nbsp; <a class="dict" target="_blank" rel="noopener" href="'
+          + 'https://andhrabharati.com/dictionary/?w=' + encodeURIComponent(m.f)
+          + '">\\u2197</a></div>';
+      }).join('');
+      panel.innerHTML = '<span class="close">close</span>'
+        + '<div class="surface">' + w.textContent + '</div>'
+        + '<div class="mrow dim">the whole verse, word by word</div>' + rows;
+    }).catch(function () {
+      panel.innerHTML = '<span class="close">close</span>'
+        + '<div class="surface">' + w.textContent + '</div>'
+        + '<div class="mrow dim">analysis unavailable</div>';
+    });
+  });
+  panel.addEventListener('click', function (e) {
+    if (e.target.classList.contains('close')) panel.classList.remove('on');
+  });
+})();
+"""
+
+
+TITLE_VEMANA = "వేమన శతకము"
