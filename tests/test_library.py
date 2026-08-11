@@ -386,7 +386,7 @@ check(
     "every Vemana verse carries an analysis",
 )
 eq(
-    sum(1 for v in _vemana for m in v.morphemes if not m.is_refrain), 2091,
+    sum(1 for v in _vemana for m in v.morphemes if not m.is_refrain), 2092,
     "the content morpheme count is what the validator checked",
 )
 
@@ -415,6 +415,38 @@ _referenced = set(re.findall(r'data-v="(\d+)"', _html))
 check(
     _referenced and _referenced <= set(_parsed),
     "every clickable word resolves to a payload entry",
+)
+
+# Alignment, which the first version of this page did not do at all: every word carried
+# the whole verse's gloss, so clicking `రాయి` listed all twelve morphemes of all four
+# lines. A token must resolve to *its own* morphemes.
+_v141 = next(v for v in _vemana if v.number == 141)
+_by_token = {token: [m.form for m in ms] for _, token, ms in _v141.alignment}
+eq(_by_token.get("రాయి"), ["రాయి"], "a word aligns to its own morpheme, not the verse's")
+eq(
+    _by_token.get("విశ్వదాభిరామ"), ["విశ్వద", "అభిరామ"],
+    "a compound token aligns to both its morphemes",
+)
+_v1 = next(v for v in _vemana if v.number == 1)
+_a1 = {token: [m.form for m in ms] for _, token, ms in _v1.alignment}
+eq(
+    _a1.get("చూడనతకు"), ["చూడన్", "అతకు"],
+    "cross-token sandhi is resolved: the previous word's consonant carried over",
+)
+# No token may be left without an analysis, and no morpheme may be dropped.
+_empty = [t for v in _vemana for _, t, ms in v.alignment if not ms]
+eq(_empty, [], "every printed token aligns to at least one morpheme")
+for _verse in _vemana:
+    _placed = {id(m) for _, _, ms in _verse.alignment for m in ms}
+    check(
+        all(id(m) in _placed for m in _verse.morphemes),
+        f"verse {_verse.number} places every morpheme",
+    ) if len(_placed) < len(_verse.morphemes) else None
+_sizes = [len(ms) for v in _vemana for _, _, ms in v.alignment]
+check(
+    sum(_sizes) / len(_sizes) < 2.0,
+    "a token carries a couple of morphemes, not the whole verse",
+    f"mean {sum(_sizes) / len(_sizes):.2f}",
 )
 
 

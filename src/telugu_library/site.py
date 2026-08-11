@@ -423,8 +423,8 @@ def render_vemana(verses, url: str = "") -> tuple[str, str]:
     The analysis is fetched rather than inlined. Writing it into each word's `data-m`
     made a page of 146 short verses **7.3 MB**: there are only 143 distinct payloads, one
     per verse, but they were copied into 2,015 word attributes, so 98% of the file was
-    duplication. Each word now carries its verse number and its index, and the panel
-    looks the analysis up in one fetched object.
+    duplication. Each word now carries its verse number and its own token index, and the
+    panel looks up just that token's morphemes.
     """
     parts: list[str] = [f"<h1>{html.escape(TITLE_VEMANA)}</h1>"]
     morphemes = sum(len(v.morphemes) for v in verses)
@@ -438,19 +438,39 @@ def render_vemana(verses, url: str = "") -> tuple[str, str]:
     for verse in verses:
         parts.append('<div class="verse">')
         parts.append(f'<div class="vref">{verse.reference}</div>')
-        # Vemana's verses are short and the source lists morphemes per verse rather than
-        # per token, so the whole verse shares one entry — simpler and less error-prone
-        # than the Bhāgavatam's per-token alignment, which it does not need.
         key = str(verse.number)
-        payload[key] = {
-            "m": [{"f": m.form, "g": m.gloss} for m in verse.morphemes]
-        }
-        for line in verse.lines:
-            words = " ".join(
-                f'<span class="w" data-v="{key}">{html.escape(word)}</span>'
-                for word in line.split()
-            )
-            parts.append(f'<p class="line verse-line">{words}</p>')
+        # Per token, not per verse. Before this, every word in a verse carried the whole
+        # verse's gloss, so clicking `రాయి` listed all twelve morphemes of all four lines.
+        tokens: dict[str, list] = {}
+        for position, (_, _, token_morphemes) in enumerate(verse.alignment):
+            tokens[str(position)] = [
+                {
+                    "f": morpheme.form,
+                    "g": morpheme.gloss,
+                    "s": 1 if morpheme.shared else 0,
+                }
+                for morpheme in token_morphemes
+            ]
+        payload[key] = {"tokens": tokens}
+
+        # Rendered line by line, keeping the poet's lineation, with each token's index so
+        # the panel can find it.
+        position = 0
+        for line_index, line in enumerate(verse.lines):
+            rendered: list[str] = []
+            for token in line.split():
+                escaped = html.escape(token)
+                if position < len(verse.alignment) and verse.alignment[position][1] == token:
+                    rendered.append(
+                        f'<span class="w" data-v="{key}" data-p="{position}">'
+                        f"{escaped}</span>"
+                    )
+                    position += 1
+                else:
+                    # A token the aligner skipped — punctuation or a digit. Inert, and it
+                    # looks inert, rather than offering a panel with nothing in it.
+                    rendered.append(f'<span class="gap">{escaped}</span>')
+            parts.append('<p class="line verse-line">' + " ".join(rendered) + "</p>")
         parts.append("</div>")
 
     document = _page(
@@ -460,9 +480,8 @@ def render_vemana(verses, url: str = "") -> tuple[str, str]:
     return document, json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
-# The Vemana panel. One fetch for the whole text, then every click is a dictionary lookup.
-# Shows the verse's morphemes rather than a single word's, which is what the hand analysis
-# records — and says so, so the reader is not left thinking the panel misfired.
+# The Vemana panel. One fetch for the whole text, then every click is a dictionary lookup
+# of that token's own morphemes.
 VEMANA_PANEL_JS = """
 (function () {
   var panel = document.getElementById('panel');
@@ -479,26 +498,33 @@ VEMANA_PANEL_JS = """
     return pending;
   }
 
+  function row(m) {
+    var bits = ['<span class="lemma">' + m.f + '</span>'];
+    // A word running across the line break is listed under both halves; saying so stops
+    // it looking like the wrong word was attached.
+    if (m.s) bits.push('<span class="shared">spans the line break</span>');
+    bits.push('<span class="tel">' + m.g + '</span>');
+    bits.push('<a class="dict" target="_blank" rel="noopener" href="'
+      + 'https://andhrabharati.com/dictionary/?w=' + encodeURIComponent(m.f)
+      + '">\\u2197</a>');
+    return '<div class="mrow">' + bits.join(' &nbsp; ') + '</div>';
+  }
+
   document.addEventListener('click', function (e) {
     var w = e.target.closest ? e.target.closest('.w') : null;
     if (!w) return;
-    var key = w.dataset.v;
+    var key = w.dataset.v, pos = w.dataset.p;
     panel.innerHTML = '<span class="close">close</span><div class="surface">'
       + w.textContent + '</div><div class="mrow dim">…</div>';
     panel.classList.add('on');
     load().then(function (j) {
-      var entry = j[key];
-      if (!entry) return;
-      var rows = entry.m.map(function (m) {
-        return '<div class="mrow"><span class="lemma">' + m.f + '</span>'
-          + ' &nbsp; <span class="tel">' + m.g + '</span>'
-          + ' &nbsp; <a class="dict" target="_blank" rel="noopener" href="'
-          + 'https://andhrabharati.com/dictionary/?w=' + encodeURIComponent(m.f)
-          + '">\\u2197</a></div>';
-      }).join('');
+      var verse = j[key];
+      if (!verse) return;
+      var ms = verse.tokens[pos] || [];
       panel.innerHTML = '<span class="close">close</span>'
         + '<div class="surface">' + w.textContent + '</div>'
-        + '<div class="mrow dim">the whole verse, word by word</div>' + rows;
+        + (ms.length ? ms.map(row).join('')
+                     : '<div class="mrow dim">no analysis</div>');
     }).catch(function () {
       panel.innerHTML = '<span class="close">close</span>'
         + '<div class="surface">' + w.textContent + '</div>'

@@ -29,9 +29,10 @@ that is what andhrabharati supplies.
 
 from __future__ import annotations
 
-import difflib
 import re
 from dataclasses import dataclass, field
+
+from .alignment import AKSHARAM, aksharams, align_streams, shared_indices
 
 # The verse id: abbreviation, skandham, verse number, metre.
 #
@@ -340,107 +341,30 @@ def confirm(verses: list[Verse], lookup=None, limit: int | None = None) -> dict:
     }
 
 
-# An aksharam: a consonant cluster plus its vowel, or a bare vowel. Alignment counts in
-# these because they are the units the metre counts and the units sandhi operates on.
-AKSHARAM = re.compile(r"[ఀ-౿][ా-్ౖ]*(?:[్][ఀ-౿][ా-ౖ]*)*")
-
-
-def aksharams(text: str) -> list[str]:
-    return AKSHARAM.findall(text)
 
 
 def align(verse: Verse) -> list[tuple[str, list[Morpheme]]]:
     """Maps each printed token of the verse to the morphemes that make it up.
 
-    Done by aligning the two **character streams** — the verse with its spaces removed,
-    and the editor's morphemes concatenated — and letting a standard longest-common-
-    subsequence matcher decide the correspondence. The streams are 88% identical, because
-    sandhi changes only the seams, so almost every character has an obvious counterpart.
-
-    This is the fourth approach and the first correct one. The three that failed all shared
-    a mistake: they tried to assign whole morphemes to whole tokens by *counting*.
-
-      * Counting codepoints ignored that Telugu is an abugida — `జేరుటకునై` is 9 codepoints
-        and 5 aksharams, so the arithmetic measured nothing real.
-      * Counting aksharams greedily drifted, since a greedy choice cannot be revised: one
-        token over-consuming shifted every later token, and a reader clicking a word saw
-        the next word's breakdown.
-      * A global dynamic program over aksharam lengths fixed the cascade but still assumed
-        morphemes fit inside tokens, so it reached only 78% agreement.
-
-    That assumption is simply false. Classical printing breaks lines on the metre, not the
-    word, so a morpheme routinely straddles two tokens:
-
-        పరికరస్యందనారూఢుం  డగు        as printed
-        పరికర స్యందన ఆరూఢుండు అగున్    as the editor separates it
-
-    The `డ` opening the second token is the final consonant of `ఆరూఢుండు`. Character
-    alignment represents that directly — `ఆరూఢుండు` simply matches characters in both
-    tokens — where any whole-morpheme assignment has to choose one and be wrong.
-
-    A morpheme is attached to every token it has characters in, so a straddling morpheme
-    appears under both. That is the truth about the text rather than a compromise: the word
-    really does span the line break, and a reader clicking either half should see it.
+    The method, and why three earlier ones failed, is documented in `alignment`. It lives
+    there rather than here because the Vemana reader needed the same thing and shipped
+    without it — every word in a verse carried the whole verse's gloss.
     """
     tokens = [token for token in verse.text.split() if AKSHARAM.search(token)]
     if not tokens or not verse.morphemes:
         return [(token, []) for token in tokens]
 
-    # The verse as one run of Telugu characters, remembering which token each came from.
-    surface: list[str] = []
-    token_of: list[int] = []
-    for index, token in enumerate(tokens):
-        for character in token:
-            if _is_telugu(character):
-                surface.append(character)
-                token_of.append(index)
+    by_token = align_streams(tokens, [m.form for m in verse.morphemes])
 
-    # The morphemes likewise, remembering which morpheme each character came from.
-    stream: list[str] = []
-    morpheme_of: list[int] = []
-    for index, morpheme in enumerate(verse.morphemes):
-        for character in morpheme.form:
-            if _is_telugu(character):
-                stream.append(character)
-                morpheme_of.append(index)
-
-    matcher = difflib.SequenceMatcher(
-        None, "".join(surface), "".join(stream), autojunk=False
-    )
-    # Which morphemes have characters in which tokens.
-    by_token: list[list[int]] = [[] for _ in tokens]
-    for surface_start, stream_start, length in matcher.get_matching_blocks():
-        for offset in range(length):
-            token_index = token_of[surface_start + offset]
-            morpheme_index = morpheme_of[stream_start + offset]
-            if morpheme_index not in by_token[token_index]:
-                by_token[token_index].append(morpheme_index)
-
-    # A morpheme that matched nothing — usually a single vowel wholly absorbed by sandhi,
-    # such as the `ఐ` in `గంటకుండై` — is placed with its neighbour so no gloss is lost.
-    placed = {index for indices in by_token for index in indices}
-    for index in range(len(verse.morphemes)):
-        if index in placed:
-            continue
-        for token_index, indices in enumerate(by_token):
-            if any(neighbour in (index - 1, index + 1) for neighbour in indices):
-                by_token[token_index].append(index)
-                break
-
-    # A morpheme appearing under more than one token straddles a line break: Telugu writes
-    # a word's final consonant as the first letter of the following token, so `జనించెన్`
-    # ends inside `నంత.`. Marked as shared, so the reader is told rather than left to
-    # wonder why a token lists a word that is mostly elsewhere.
-    appearances: dict[int, int] = {}
-    for indices in by_token:
-        for index in indices:
-            appearances[index] = appearances.get(index, 0) + 1
-    for index, count in appearances.items():
-        if count > 1:
-            verse.morphemes[index].shared = True
+    # A morpheme under more than one token straddles a line break: Telugu writes a word's
+    # final consonant as the first letter of the following token, so `జనించెన్` ends inside
+    # `నంత.`. Marked, so the reader is told rather than left wondering why a token lists a
+    # word that is mostly elsewhere.
+    for index in shared_indices(by_token):
+        verse.morphemes[index].shared = True
 
     return [
-        (token, [verse.morphemes[i] for i in sorted(indices)])
+        (token, [verse.morphemes[i] for i in indices])
         for token, indices in zip(tokens, by_token)
     ]
 
