@@ -15,7 +15,13 @@ import sys
 from pathlib import Path
 
 from . import site
-from . import build_bhagavatam, build_from_store, build_sahasranamam, build_vemana
+from . import (
+    build_bhagavatam,
+    build_from_store,
+    build_sahasranamam,
+    build_sumati,
+    build_vemana,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "site"
@@ -35,6 +41,10 @@ WORKS = [
         "వేమన శతకము",
         "Vemana's 146 verses, analysed word by word — this project's own gloss, "
         "since no published ṭīka of Vemana exists",
+    ),
+    (
+        "సుమతీ శతకము",
+        "Baddena's 108 verses of practical ethics, analysed word by word",
     ),
 ]
 
@@ -62,6 +72,8 @@ def main(argv: list[str] | None = None) -> int:
     build_sahasranamam.main(["--out", str(args.out)])
     print("\n=== Vemana")
     build_vemana.main(["--out", str(args.out)])
+    print("\n=== Sumatī")
+    build_sumati.main(["--out", str(args.out)])
 
     # The library index, over works rather than over the Bhāgavatam's skandhams. The
     # Bhāgavatam's own contents page is written by its builder.
@@ -71,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
             ("1,000 names", "../text/vishnu-sahasranamam")
         ],
         "వేమన శతకము": [("146 verses", "../text/vemana-satakam")],
+        "సుమతీ శతకము": [("108 verses", "../text/sumati-satakam")],
     }
     site.write(
         args.out / "index.html",

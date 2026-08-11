@@ -413,8 +413,18 @@ def render_library(works: list[tuple[str, str]], entries: dict) -> str:
     return _page("తెలుగు గ్రంథాలయం", "\n".join(parts), depth=0)
 
 
-def render_vemana(verses, url: str = "") -> tuple[str, str]:
-    """Vemana's verses with the word-by-word analysis, as (html, payload_json).
+def render_satakam(
+    verses,
+    title: str,
+    slug: str,
+    provenance: str = "",
+) -> tuple[str, str]:
+    """A śatakam with its word-by-word analysis, as (html, payload_json).
+
+    Serves Vemana and Sumatī both, because the two are the same shape: 100-odd short
+    verses, a flat morpheme list per verse, and the shared aligner mapping morphemes onto
+    printed tokens. Writing a second renderer would have meant a second copy of the
+    payload bug fixed below.
 
     The provenance line is deliberately explicit. For the Bhāgavatam the gloss is a
     scholar's, quoted; here it is this project's own analysis, and a reader deserves to
@@ -426,13 +436,12 @@ def render_vemana(verses, url: str = "") -> tuple[str, str]:
     duplication. Each word now carries its verse number and its own token index, and the
     panel looks up just that token's morphemes.
     """
-    parts: list[str] = [f"<h1>{html.escape(TITLE_VEMANA)}</h1>"]
+    parts: list[str] = [f"<h1>{html.escape(title)}</h1>"]
     morphemes = sum(len(v.morphemes) for v in verses)
-    parts.append(
-        f'<p class="sub">{len(verses):,} verses · {morphemes:,} morphemes · '
-        "the word-by-word analysis here is this project's own, not a scholar's — "
-        "no published gloss of Vemana exists online</p>"
-    )
+    summary = f"{len(verses):,} verses · {morphemes:,} morphemes"
+    if provenance:
+        summary += f" · {provenance}"
+    parts.append(f'<p class="sub">{summary}</p>')
 
     payload: dict[str, dict] = {}
     for verse in verses:
@@ -474,15 +483,15 @@ def render_vemana(verses, url: str = "") -> tuple[str, str]:
         parts.append("</div>")
 
     document = _page(
-        TITLE_VEMANA, "\n".join(parts), depth=1, panel=VEMANA_PANEL_JS,
-        payload="../data/vemana-satakam.json",
+        title, "\n".join(parts), depth=1, panel=SATAKAM_PANEL_JS,
+        payload=f"../data/{slug}.json",
     )
     return document, json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
-# The Vemana panel. One fetch for the whole text, then every click is a dictionary lookup
+# The śatakam panel. One fetch for the whole text, then every click is a dictionary lookup
 # of that token's own morphemes.
-VEMANA_PANEL_JS = """
+SATAKAM_PANEL_JS = """
 (function () {
   var panel = document.getElementById('panel');
   if (!panel) return;
@@ -539,3 +548,12 @@ VEMANA_PANEL_JS = """
 
 
 TITLE_VEMANA = "వేమన శతకము"
+
+
+def render_vemana(verses, url: str = "") -> tuple[str, str]:
+    """Vemana, kept as a named entry point so callers need not know the shared shape."""
+    return render_satakam(
+        verses, TITLE_VEMANA, "vemana-satakam",
+        "the word-by-word analysis here is this project's own, not a scholar's — "
+        "no published gloss of Vemana exists online",
+    )

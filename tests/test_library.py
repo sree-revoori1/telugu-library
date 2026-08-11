@@ -450,6 +450,52 @@ check(
 )
 
 
+# --- The Sumatī Śatakam ---------------------------------------------------
+# Same guards as Vemana, because it is the same shape and would fail the same ways.
+
+from telugu_library import build_sumati, sumati as sumati_module
+
+_sumati = sumati_module.load()
+eq(len(_sumati), 108, "all 108 Sumatī verses load")
+check(all(v.morphemes for v in _sumati), "every Sumatī verse carries an analysis")
+check("సుమతీ శతకము" in _titles, "Sumatī is listed in the library index")
+eq(build_sumati.SLUG, "sumati-satakam", "the Sumatī page has a stable slug")
+
+# The refrain differs from Vemana's in kind: one word, and part of the sentence's own
+# grammar (the vocative it addresses), so it is glossed rather than set aside.
+eq(sumati_module.REFRAIN_WORDS, frozenset({"సుమతీ"}), "the refrain is one vocative word")
+
+_s_empty = [t for v in _sumati for _, t, ms in v.alignment if not ms]
+eq(_s_empty, [], "every printed Sumatī token aligns to a morpheme")
+_s_sizes = [len(ms) for v in _sumati for _, _, ms in v.alignment]
+check(
+    sum(_s_sizes) / len(_s_sizes) < 2.0,
+    "a Sumatī token carries a couple of morphemes, not the whole verse",
+    f"mean {sum(_s_sizes) / len(_s_sizes):.2f}",
+)
+_s50 = next(v for v in _sumati if v.number == 50)
+_a50 = {token: [m.form for m in ms] for _, token, ms in _s50.alignment}
+eq(_a50.get("కోపమె"), ["కోపమె"], "a Sumatī word aligns to its own morpheme")
+
+_s_html, _s_payload = site.render_satakam(
+    _sumati, sumati_module.TITLE, build_sumati.SLUG, build_sumati.PROVENANCE
+)
+check("data-m=" not in _s_html, "the Sumatī page does not inline its analysis")
+check(
+    len(_s_html.encode()) < 400_000, "the Sumatī page stays small",
+    f"{len(_s_html.encode()) / 1024:.0f} KB",
+)
+_s_parsed = json.loads(_s_payload)
+eq(len(_s_parsed), 108, "the Sumatī payload covers every verse")
+check(
+    all(
+        _s_parsed.get(v, {}).get("tokens", {}).get(p)
+        for v, p in re.findall(r'data-v="(\d+)" data-p="(\d+)"', _s_html)
+    ),
+    "every clickable Sumatī word resolves to its own morphemes",
+)
+
+
 # --- Report ---------------------------------------------------------------
 
 print()
