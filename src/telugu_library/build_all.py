@@ -17,6 +17,7 @@ from pathlib import Path
 from . import site
 from . import (
     build_bhagavatam,
+    build_dasarathi,
     build_from_store,
     build_sahasranamam,
     build_sumati,
@@ -46,6 +47,11 @@ WORKS = [
         "సుమతీ శతకము",
         "Baddena's 108 verses of practical ethics, analysed word by word",
     ),
+    (
+        "దాశరథీ శతకము",
+        "Rāmadāsu's 104 verses to Rāma of Bhadrāchalam — dense Sanskrit compounds, "
+        "split word by word",
+    ),
 ]
 
 
@@ -74,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
     build_vemana.main(["--out", str(args.out)])
     print("\n=== Sumatī")
     build_sumati.main(["--out", str(args.out)])
+    print("\n=== Dāśarathī")
+    build_dasarathi.main(["--out", str(args.out)])
 
     # The library index, over works rather than over the Bhāgavatam's skandhams. The
     # Bhāgavatam's own contents page is written by its builder.
@@ -84,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         ],
         "వేమన శతకము": [("146 verses", "../text/vemana-satakam")],
         "సుమతీ శతకము": [("108 verses", "../text/sumati-satakam")],
+        "దాశరథీ శతకము": [("104 verses", "../text/dasarathi-satakam")],
     }
     site.write(
         args.out / "index.html",

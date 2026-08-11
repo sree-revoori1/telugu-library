@@ -386,7 +386,7 @@ check(
     "every Vemana verse carries an analysis",
 )
 eq(
-    sum(1 for v in _vemana for m in v.morphemes if not m.is_refrain), 2092,
+    sum(1 for v in _vemana for m in v.morphemes if not m.is_refrain), 2098,
     "the content morpheme count is what the validator checked",
 )
 
@@ -493,6 +493,65 @@ check(
         for v, p in re.findall(r'data-v="(\d+)" data-p="(\d+)"', _s_html)
     ),
     "every clickable Sumatī word resolves to its own morphemes",
+)
+
+
+# --- The Dāśarathī Śatakam ------------------------------------------------
+# The hard case, and the tests are aimed at what makes it hard rather than repeating the
+# other two: words split across the line end, the yati caesura falling inside a word, and
+# long Sanskrit compounds.
+
+from telugu_library import build_dasarathi, dasarathi as dasarathi_module
+
+_dasarathi = dasarathi_module.load()
+eq(len(_dasarathi.verses), 104, "all 104 Dāśarathī verses load")
+check("దాశరథీ శతకము" in _titles, "Dāśarathī is listed in the library index")
+eq(build_dasarathi.SLUG, "dasarathi-satakam", "the Dāśarathī page has a stable slug")
+eq(_dasarathi.unaligned, [], "every printed Dāśarathī token aligns to a morpheme")
+
+# Verse 63 spells the refrain `దాసరథీ` with స for శ. Parsing on the refrain rather than the
+# number marker dropped that verse silently, so both spellings are recognised.
+check(
+    "దాసరథీ" in dasarathi_module.REFRAIN_WORDS,
+    "the verse-63 refrain spelling is recognised",
+)
+
+# The defining case: a word set across the line end must attach to BOTH printed tokens and
+# be marked shared. Verse 1 sets `శృంగార` as `…శృం` / `గార…`.
+_v1 = next(v for v in _dasarathi.verses if v.number == 1)
+_by_token = [(t, [m.form for m in ms]) for _, t, ms in _v1.alignment]
+_split = [t for t, forms in _by_token if "శృంగార" in forms]
+eq(_split, ["శృం", "గార"], "a word split across the line end appears under both tokens")
+check(
+    all(m.shared for v in _dasarathi.verses for m in v.morphemes
+        if m.form == "శృంగార"),
+    "...and is marked as spanning the break",
+)
+
+# The yati caesura falls inside a word: `త్రిజగత్` is set `త్రిజ-గన్నుత`.
+_yati = dict(_by_token).get("త్రిజ-గన్నుత")
+eq(_yati, ["త్రిజగత్", "నుత"], "a yati-split token resolves to its two morphemes")
+
+# A long compound splits into its constituents, which is the whole value of the gloss —
+# `కల్మషార్నవోత్తారకనామ` is four words no dictionary lists together.
+_forms = {m.form for m in _v1.morphemes}
+check(
+    {"కల్మష", "ఆర్నవ", "ఉత్తారక", "నామ"} <= _forms,
+    "a long Sanskrit compound is split into its constituents",
+)
+
+_d_html, _d_payload = site.render_satakam(
+    _dasarathi.verses, dasarathi_module.TITLE, build_dasarathi.SLUG,
+    dasarathi_module.PROVENANCE,
+)
+check("data-m=" not in _d_html, "the Dāśarathī page does not inline its analysis")
+eq(len(json.loads(_d_payload)), 104, "the Dāśarathī payload covers every verse")
+check(
+    all(
+        json.loads(_d_payload).get(v, {}).get("tokens", {}).get(p)
+        for v, p in re.findall(r'data-v="(\d+)" data-p="(\d+)"', _d_html)
+    ),
+    "every clickable Dāśarathī word resolves to its own morphemes",
 )
 
 
